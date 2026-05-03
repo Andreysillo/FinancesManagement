@@ -24,4 +24,6 @@ cabal.project.local~
 .stack-work/
 registros.dat
 .DS_Store
+reglas.dat
+
 

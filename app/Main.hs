@@ -3,6 +3,7 @@ module Main where
 import Display
 import Persistence
 import Records
+import Rules
 import Types
 
 import Data.Char          (isSpace, toLower)
@@ -65,8 +66,8 @@ selectRecordType = do
 -- Menú: agregar registro
 -- ---------------------------------------------------------------------------
 
-addRecordMenu :: RecordStore -> IO RecordStore
-addRecordMenu store = do
+addRecordMenu :: RecordStore -> RuleStore -> IO RecordStore
+addRecordMenu store rules = do
   putStrLn "\n--- Agregar Registro Financiero ---"
   mrtype <- selectRecordType
   case mrtype of
@@ -96,8 +97,10 @@ addRecordMenu store = do
                 then do
                   let newStore = addRecord store rtype amt cat d desc tgs
                   printf "  Registro #%d agregado correctamente.\n" (length newStore)
-                  -- Persistencia automática: guarda cada vez que se agrega un registro
                   saveRecords defaultFilePath newStore
+                  -- Evalúa las reglas automáticamente tras cada nuevo registro
+                  putStrLn "\n  Verificando reglas..."
+                  evaluateRules rules newStore
                   return newStore
                 else putStrLn "  Cancelado. No se guardo ningun registro." >> return store
 
@@ -143,13 +146,11 @@ filterMenu store = do
           let r = filterByType rtype store
           printf "\n  %s: %d registro(s)\n" (recordTypeName rtype) (length r)
           printRecords r
-
     "2" -> do
       cat <- trim <$> prompt "  Categoria: "
       let r = filterByCategory cat store
       printf "\n  Categoria '%s': %d registro(s)\n" cat (length r)
       printRecords r
-
     "3" -> do
       fromStr <- prompt "  Desde (DD-MM-YYYY): "
       toStr   <- prompt "  Hasta (DD-MM-YYYY): "
@@ -159,14 +160,93 @@ filterMenu store = do
           printf "\n  Rango [%s - %s]: %d registro(s)\n" fromStr toStr (length r)
           printRecords r
         _ -> putStrLn "  Fechas invalidas. Use DD-MM-YYYY."
-
     "4" -> do
       tag <- trim <$> prompt "  Etiqueta: "
       let r = filterByTag tag store
       printf "\n  Etiqueta '%s': %d registro(s)\n" tag (length r)
       printRecords r
-
     _ -> putStrLn "  Opcion invalida."
+
+-- ---------------------------------------------------------------------------
+-- Menú: sistema de reglas (2.5)
+-- ---------------------------------------------------------------------------
+
+rulesMenu :: RuleStore -> RecordStore -> IO RuleStore
+rulesMenu rules store = do
+  putStrLn "\n--- Sistema de Reglas ---"
+  putStrLn "  1. Agregar regla: alerta de gasto por categoria"
+  putStrLn "  2. Agregar regla: advertencia de ahorro minimo"
+  putStrLn "  3. Ver reglas activas"
+  putStrLn "  4. Eliminar una regla"
+  putStrLn "  5. Evaluar reglas ahora"
+  putStrLn "  6. Volver"
+  opt <- prompt "  Opcion (1-6): "
+  case opt of
+
+    "1" -> do
+      putStrLn "\n  -- Nueva regla: limite de gasto por categoria --"
+      cat    <- trim <$> prompt "  Categoria: "
+      limStr <- prompt "  Monto maximo permitido: "
+      case readMaybe limStr :: Maybe Double of
+        Nothing  -> putStrLn "  Monto invalido. Cancelado." >> return rules
+        Just lim -> do
+          let newRules = addExpenseRule rules cat lim
+          saveRules newRules
+          printf "  Regla creada: si gastos en '%s' superan %.2f -> alerta.\n" cat lim
+          return newRules
+
+    "2" -> do
+      putStrLn "\n  -- Nueva regla: ahorro minimo total --"
+      minStr <- prompt "  Monto minimo de ahorro: "
+      case readMaybe minStr :: Maybe Double of
+        Nothing  -> putStrLn "  Monto invalido. Cancelado." >> return rules
+        Just minAmt -> do
+          let newRules = addSavingRule rules minAmt
+          saveRules newRules
+          printf "  Regla creada: si ahorro total es menor a %.2f -> advertencia.\n" minAmt
+          return newRules
+
+    "3" -> do
+      putStrLn "\n  -- Reglas activas --"
+      if null rules
+        then putStrLn "  (No hay reglas definidas.)"
+        else mapM_ printRuleSummary rules
+      return rules
+
+    "4" -> do
+      if null rules
+        then putStrLn "  No hay reglas para eliminar." >> return rules
+        else do
+          putStrLn "\n  -- Reglas activas --"
+          mapM_ printRuleSummary rules
+          idStr <- prompt "  ID de la regla a eliminar: "
+          case readMaybe idStr :: Maybe Int of
+            Nothing  -> putStrLn "  ID invalido." >> return rules
+            Just rid ->
+              if any ((== rid) . ruleId) rules
+                then do
+                  let newRules = removeRule rid rules
+                  saveRules newRules
+                  printf "  Regla #%d eliminada.\n" rid
+                  return newRules
+                else putStrLn "  No existe una regla con ese ID." >> return rules
+
+    "5" -> evaluateRules rules store >> return rules
+
+    "6" -> return rules
+
+    _   -> putStrLn "  Opcion invalida." >> return rules
+
+-- | Imprime un resumen legible de una regla.
+printRuleSummary :: Rule -> IO ()
+printRuleSummary rule =
+  case ruleType rule of
+    ExpenseLimitRule cat lim ->
+      printf "  [#%d] ALERTA si gastos en '%s' superan %.2f\n"
+             (ruleId rule) cat lim
+    SavingMinRule minAmt ->
+      printf "  [#%d] ADVERTENCIA si ahorro total es menor a %.2f\n"
+             (ruleId rule) minAmt
 
 -- ---------------------------------------------------------------------------
 -- Placeholder para secciones en desarrollo
@@ -187,11 +267,12 @@ header = do
   putStrLn "   Sistema de Gestion Financiera v1.0"
   putStrLn "========================================"
 
-mainLoop :: RecordStore -> IO ()
-mainLoop store = do
+mainLoop :: RecordStore -> RuleStore -> IO ()
+mainLoop store rules = do
   putStrLn ""
   header
-  printf "  Registros en memoria: %d\n" (length store)
+  printf "  Registros en memoria : %d\n" (length store)
+  printf "  Reglas activas       : %d\n" (length rules)
   putStrLn "----------------------------------------"
   putStrLn "  1. Agregar registro financiero"
   putStrLn "  2. Listar registros"
@@ -200,29 +281,29 @@ mainLoop store = do
   putStrLn "  4. Presupuestos               [2.2 - En desarrollo]"
   putStrLn "  5. Analisis financiero        [2.3 - En desarrollo]"
   putStrLn "  6. Simulacion financiera      [2.4 - En desarrollo]"
-  putStrLn "  7. Sistema de reglas          [2.5 - En desarrollo]"
+  putStrLn "  7. Sistema de reglas"
   putStrLn "  8. Reportes                   [2.7 - En desarrollo]"
   putStrLn "  ----"
   putStrLn "  9. Salir"
   putStrLn "========================================"
   opt <- prompt "  Opcion: "
   case opt of
-    "1" -> addRecordMenu store >>= mainLoop
-    "2" -> listMenu store      >> mainLoop store
-    "3" -> filterMenu store    >> mainLoop store
-    "4" -> comingSoon "Presupuestos"            >> mainLoop store
-    "5" -> comingSoon "Analisis Financiero"     >> mainLoop store
-    "6" -> comingSoon "Simulacion Financiera"   >> mainLoop store
-    "7" -> comingSoon "Sistema de Reglas"       >> mainLoop store
-    "8" -> comingSoon "Reportes"                >> mainLoop store
-    "9" -> exitApp store
-    _   -> putStrLn "  Opcion invalida." >> mainLoop store
+    "1" -> addRecordMenu store rules >>= \newStore -> mainLoop newStore rules
+    "2" -> listMenu store            >> mainLoop store rules
+    "3" -> filterMenu store          >> mainLoop store rules
+    "4" -> comingSoon "Presupuestos"          >> mainLoop store rules
+    "5" -> comingSoon "Analisis Financiero"   >> mainLoop store rules
+    "6" -> comingSoon "Simulacion Financiera" >> mainLoop store rules
+    "7" -> rulesMenu rules store >>= \newRules -> mainLoop store newRules
+    "8" -> comingSoon "Reportes"              >> mainLoop store rules
+    "9" -> exitApp store rules
+    _   -> putStrLn "  Opcion invalida." >> mainLoop store rules
 
--- | Guarda antes de salir y se despide.
-exitApp :: RecordStore -> IO ()
-exitApp store = do
+exitApp :: RecordStore -> RuleStore -> IO ()
+exitApp store rules = do
   putStrLn "\n  Guardando datos antes de salir..."
   saveRecords defaultFilePath store
+  saveRules rules
   putStrLn "\n  Hasta luego!\n"
 
 main :: IO ()
@@ -232,6 +313,6 @@ main = do
   putStrLn ""
   putStrLn "  Bienvenido al Sistema de Gestion Financiera"
   putStrLn "  Cargando datos..."
-  -- Persistencia: carga el store desde archivo al iniciar
   store <- loadRecords defaultFilePath
-  mainLoop store
+  rules <- loadRules
+  mainLoop store rules
