@@ -12,6 +12,7 @@ library
       Types
     , Records
     , Display
+    , Persistence
   hs-source-dirs:   src
   build-depends:
       base   >= 4.7 && < 5

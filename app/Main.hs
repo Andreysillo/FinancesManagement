@@ -1,6 +1,7 @@
 module Main where
 
 import Display
+import Persistence
 import Records
 import Types
 
@@ -22,7 +23,6 @@ prompt msg = putStr msg >> hFlush stdout >> getLine
 trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
--- Retorna True si el usuario confirma con "s" o "si"
 confirm :: String -> IO Bool
 confirm msg = do
   resp <- map toLower . trim <$> prompt (msg ++ " (s/n): ")
@@ -31,7 +31,6 @@ confirm msg = do
 parseDate :: String -> Maybe Day
 parseDate = parseTimeM True defaultTimeLocale "%d-%m-%Y"
 
--- Convierte "fijo, variable, mensual" → ["fijo", "variable", "mensual"]
 parseTags :: String -> [String]
 parseTags ""  = []
 parseTags s   = map trim (splitOn ',' s)
@@ -97,6 +96,8 @@ addRecordMenu store = do
                 then do
                   let newStore = addRecord store rtype amt cat d desc tgs
                   printf "  Registro #%d agregado correctamente.\n" (length newStore)
+                  -- Persistencia automática: guarda cada vez que se agrega un registro
+                  saveRecords defaultFilePath newStore
                   return newStore
                 else putStrLn "  Cancelado. No se guardo ningun registro." >> return store
 
@@ -192,7 +193,7 @@ mainLoop store = do
   header
   printf "  Registros en memoria: %d\n" (length store)
   putStrLn "----------------------------------------"
-  putStrLn "  1. Registros financieros"
+  putStrLn "  1. Agregar registro financiero"
   putStrLn "  2. Listar registros"
   putStrLn "  3. Filtrar registros"
   putStrLn "  ----"
@@ -214,8 +215,15 @@ mainLoop store = do
     "6" -> comingSoon "Simulacion Financiera"   >> mainLoop store
     "7" -> comingSoon "Sistema de Reglas"       >> mainLoop store
     "8" -> comingSoon "Reportes"                >> mainLoop store
-    "9" -> putStrLn "\n  Hasta luego!\n"
+    "9" -> exitApp store
     _   -> putStrLn "  Opcion invalida." >> mainLoop store
+
+-- | Guarda antes de salir y se despide.
+exitApp :: RecordStore -> IO ()
+exitApp store = do
+  putStrLn "\n  Guardando datos antes de salir..."
+  saveRecords defaultFilePath store
+  putStrLn "\n  Hasta luego!\n"
 
 main :: IO ()
 main = do
@@ -223,4 +231,7 @@ main = do
   hSetEncoding stdin utf8
   putStrLn ""
   putStrLn "  Bienvenido al Sistema de Gestion Financiera"
-  mainLoop emptyStore
+  putStrLn "  Cargando datos..."
+  -- Persistencia: carga el store desde archivo al iniciar
+  store <- loadRecords defaultFilePath
+  mainLoop store
