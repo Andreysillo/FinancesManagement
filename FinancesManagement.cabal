@@ -14,6 +14,7 @@ library
     , Display
     , Persistence
     , Rules
+    , Budgets
   hs-source-dirs:   src
   build-depends:
       base   >= 4.7 && < 5

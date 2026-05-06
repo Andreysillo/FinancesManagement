@@ -1,5 +1,6 @@
 module Main where
 
+import Budgets
 import Display
 import Persistence
 import Records
@@ -7,8 +8,9 @@ import Rules
 import Types
 
 import Data.Char          (isSpace, toLower)
-import Data.List          (intercalate)
-import Data.Time.Calendar (Day)
+import Data.List          (find, intercalate)
+import Data.Time.Calendar (Day, toGregorian)
+import Data.Time.Clock    (getCurrentTime, utctDay)
 import Data.Time.Format   (defaultTimeLocale, formatTime, parseTimeM)
 import System.IO          (hFlush, hSetEncoding, stdin, stdout, utf8)
 import Text.Printf        (printf)
@@ -44,7 +46,7 @@ splitOn c s =
               (_:xs) -> splitOn c xs
 
 -- ---------------------------------------------------------------------------
--- Selección de tipo de registro
+-- Seleccion de tipo de registro
 -- ---------------------------------------------------------------------------
 
 selectRecordType :: IO (Maybe RecordType)
@@ -63,7 +65,7 @@ selectRecordType = do
     _   -> Nothing
 
 -- ---------------------------------------------------------------------------
--- Menú: agregar registro
+-- Menu: agregar registro (2.1)
 -- ---------------------------------------------------------------------------
 
 addRecordMenu :: RecordStore -> RuleStore -> IO RecordStore
@@ -98,14 +100,13 @@ addRecordMenu store rules = do
                   let newStore = addRecord store rtype amt cat d desc tgs
                   printf "  Registro #%d agregado correctamente.\n" (length newStore)
                   saveRecords defaultFilePath newStore
-                  -- Evalúa las reglas automáticamente tras cada nuevo registro
                   putStrLn "\n  Verificando reglas..."
                   evaluateRules rules newStore
                   return newStore
                 else putStrLn "  Cancelado. No se guardo ningun registro." >> return store
 
 -- ---------------------------------------------------------------------------
--- Menú: listar registros
+-- Menu: listar registros (2.1)
 -- ---------------------------------------------------------------------------
 
 listMenu :: RecordStore -> IO ()
@@ -126,7 +127,7 @@ listMenu store = do
   printRecords sorted
 
 -- ---------------------------------------------------------------------------
--- Menú: filtrar registros
+-- Menu: filtrar registros (2.1)
 -- ---------------------------------------------------------------------------
 
 filterMenu :: RecordStore -> IO ()
@@ -168,7 +169,196 @@ filterMenu store = do
     _ -> putStrLn "  Opcion invalida."
 
 -- ---------------------------------------------------------------------------
--- Menú: sistema de reglas (2.5)
+-- Menu: presupuestos (2.2)
+-- ---------------------------------------------------------------------------
+
+printBudgetLine :: Budget -> IO ()
+printBudgetLine b =
+  printf "  [#%d] %-22s  Limite: %.2f\n"
+    (budgetId b) (budgetCategory b) (budgetLimit b)
+
+printComparison :: BudgetComparison -> IO ()
+printComparison c = do
+  let b    = compBudget c
+      act  = compActual c
+      lim  = budgetLimit b
+      diff = lim - act
+  putStrLn separator
+  printf "  [#%d] %s  %s\n"   (budgetId b) (budgetCategory b) (statusLabel (compStatus c))
+  printf "  Presupuesto : %.2f\n" lim
+  printf "  Gasto real  : %.2f\n" act
+  printf "  Diferencia  : %.2f  (%s)\n" (abs diff)
+    (if diff >= 0 then "disponible" else "excedido" :: String)
+
+showComparison :: BudgetStore -> RecordStore -> Maybe (Integer, Int) -> String -> IO ()
+showComparison [] _ _ _ = putStrLn "\n  (No hay presupuestos definidos.)"
+showComparison budgets store period label = do
+  let comps = compareBudgets store period budgets
+  printf "\n  --- Comparacion de presupuestos (%s) ---\n" label
+  mapM_ printComparison comps
+  putStrLn separator
+
+addBudgetMenu :: BudgetStore -> IO BudgetStore
+addBudgetMenu budgets = do
+  putStrLn "\n  -- Definir Presupuesto --"
+  cat <- trim <$> prompt "  Categoria: "
+  case findByCategory cat budgets of
+    Just existing -> do
+      printf "\n  Ya existe un presupuesto para '%s' (limite actual: %.2f).\n"
+        cat (budgetLimit existing)
+      ok <- confirm "  Desea modificar el limite?"
+      if not ok
+        then putStrLn "  Cancelado." >> return budgets
+        else askNewLimit (budgetId existing) cat budgets
+    Nothing -> do
+      limStr <- prompt "  Limite mensual: "
+      case readMaybe limStr :: Maybe Double of
+        Nothing  -> putStrLn "  Monto invalido. Cancelado." >> return budgets
+        Just lim -> do
+          printf "\n  Nuevo presupuesto: categoria '%s', limite %.2f\n" cat lim
+          ok <- confirm "  Guardar presupuesto?"
+          if ok
+            then do
+              let newBudgets = addBudget budgets cat lim
+              saveBudgets newBudgets
+              printf "  Presupuesto para '%s' creado correctamente.\n" cat
+              return newBudgets
+            else putStrLn "  Cancelado." >> return budgets
+  where
+    askNewLimit bid cat bs = do
+      limStr <- prompt "  Nuevo limite: "
+      case readMaybe limStr :: Maybe Double of
+        Nothing  -> putStrLn "  Monto invalido. Cancelado." >> return bs
+        Just lim -> do
+          printf "  Cambiar limite de '%s' a %.2f\n" cat lim
+          ok <- confirm "  Confirmar cambio?"
+          if ok
+            then do
+              let updated = updateBudget bid lim bs
+              saveBudgets updated
+              putStrLn "  Presupuesto actualizado."
+              return updated
+            else putStrLn "  Cancelado." >> return bs
+
+updateBudgetMenu :: BudgetStore -> IO BudgetStore
+updateBudgetMenu [] =
+  putStrLn "  No hay presupuestos para modificar." >> return []
+updateBudgetMenu budgets = do
+  putStrLn "\n  -- Modificar Limite de Presupuesto --"
+  mapM_ printBudgetLine budgets
+  idStr <- prompt "\n  ID del presupuesto a modificar: "
+  case readMaybe idStr :: Maybe Int of
+    Nothing  -> putStrLn "  ID invalido." >> return budgets
+    Just bid ->
+      case find ((== bid) . budgetId) budgets of
+        Nothing -> putStrLn "  No existe un presupuesto con ese ID." >> return budgets
+        Just b  -> do
+          printf "  Presupuesto: '%s'  Limite actual: %.2f\n"
+            (budgetCategory b) (budgetLimit b)
+          limStr <- prompt "  Nuevo limite: "
+          case readMaybe limStr :: Maybe Double of
+            Nothing  -> putStrLn "  Monto invalido." >> return budgets
+            Just lim -> do
+              printf "  Cambiar limite de %.2f a %.2f\n" (budgetLimit b) lim
+              ok <- confirm "  Confirmar cambio?"
+              if ok
+                then do
+                  let updated = updateBudget bid lim budgets
+                  saveBudgets updated
+                  putStrLn "  Presupuesto actualizado."
+                  return updated
+                else putStrLn "  Cancelado." >> return budgets
+
+deleteBudgetMenu :: BudgetStore -> IO BudgetStore
+deleteBudgetMenu [] =
+  putStrLn "  No hay presupuestos para eliminar." >> return []
+deleteBudgetMenu budgets = do
+  putStrLn "\n  -- Eliminar Presupuesto --"
+  mapM_ printBudgetLine budgets
+  idStr <- prompt "\n  ID del presupuesto a eliminar: "
+  case readMaybe idStr :: Maybe Int of
+    Nothing  -> putStrLn "  ID invalido." >> return budgets
+    Just bid ->
+      case find ((== bid) . budgetId) budgets of
+        Nothing -> putStrLn "  No existe un presupuesto con ese ID." >> return budgets
+        Just b  -> do
+          printf "  Eliminar presupuesto de '%s' (limite: %.2f)\n"
+            (budgetCategory b) (budgetLimit b)
+          ok <- confirm "  Esta seguro? Esta accion no se puede deshacer"
+          if ok
+            then do
+              let updated = removeBudget bid budgets
+              saveBudgets updated
+              printf "  Presupuesto #%d eliminado.\n" bid
+              return updated
+            else putStrLn "  Cancelado." >> return budgets
+
+budgetsMenu :: BudgetStore -> RecordStore -> IO BudgetStore
+budgetsMenu budgets store = do
+  putStrLn "\n--- Presupuestos ---"
+  putStrLn "  1. Definir presupuesto por categoria"
+  putStrLn "  2. Ver presupuestos definidos"
+  putStrLn "  3. Comparar vs gastos reales (mes actual)"
+  putStrLn "  4. Comparar vs gastos reales (otro periodo)"
+  putStrLn "  5. Ver alertas de presupuesto"
+  putStrLn "  6. Modificar limite de presupuesto"
+  putStrLn "  7. Eliminar presupuesto"
+  putStrLn "  8. Volver"
+  opt <- prompt "  Opcion (1-8): "
+  case opt of
+    "1" -> addBudgetMenu budgets
+
+    "2" -> do
+      if null budgets
+        then putStrLn "  (No hay presupuestos definidos.)"
+        else do
+          putStrLn "\n  -- Presupuestos definidos --"
+          putStrLn separator
+          mapM_ printBudgetLine budgets
+          putStrLn separator
+      return budgets
+
+    "3" -> do
+      today <- utctDay <$> getCurrentTime
+      let (yr, mo, _) = toGregorian today
+          label = show mo ++ "/" ++ show yr
+      showComparison budgets store (Just (yr, mo)) label
+      return budgets
+
+    "4" -> do
+      moStr <- prompt "  Mes (1-12): "
+      yrStr <- prompt "  Ano (ej: 2026): "
+      case (readMaybe moStr :: Maybe Int, readMaybe yrStr :: Maybe Integer) of
+        (Just mo, Just yr) | mo >= 1 && mo <= 12 -> do
+          let label = show mo ++ "/" ++ show yr
+          showComparison budgets store (Just (yr, mo)) label
+        _ -> putStrLn "  Periodo invalido."
+      return budgets
+
+    "5" -> do
+      today <- utctDay <$> getCurrentTime
+      let (yr, mo, _) = toGregorian today
+          comps  = compareBudgets store (Just (yr, mo)) budgets
+          alerts = budgetAlerts comps
+      if null alerts
+        then putStrLn "\n  Todos los presupuestos estan dentro del limite."
+        else do
+          printf "\n  %d presupuesto(s) con alerta (mes %d/%d):\n"
+            (length alerts) mo yr
+          mapM_ printComparison alerts
+          putStrLn separator
+      return budgets
+
+    "6" -> updateBudgetMenu budgets
+
+    "7" -> deleteBudgetMenu budgets
+
+    "8" -> return budgets
+
+    _   -> putStrLn "  Opcion invalida." >> return budgets
+
+-- ---------------------------------------------------------------------------
+-- Menu: sistema de reglas (2.5)
 -- ---------------------------------------------------------------------------
 
 rulesMenu :: RuleStore -> RecordStore -> IO RuleStore
@@ -182,7 +372,6 @@ rulesMenu rules store = do
   putStrLn "  6. Volver"
   opt <- prompt "  Opcion (1-6): "
   case opt of
-
     "1" -> do
       putStrLn "\n  -- Nueva regla: limite de gasto por categoria --"
       cat    <- trim <$> prompt "  Categoria: "
@@ -190,10 +379,15 @@ rulesMenu rules store = do
       case readMaybe limStr :: Maybe Double of
         Nothing  -> putStrLn "  Monto invalido. Cancelado." >> return rules
         Just lim -> do
-          let newRules = addExpenseRule rules cat lim
-          saveRules newRules
-          printf "  Regla creada: si gastos en '%s' superan %.2f -> alerta.\n" cat lim
-          return newRules
+          printf "  Regla: si gastos en '%s' superan %.2f -> alerta\n" cat lim
+          ok <- confirm "  Guardar regla?"
+          if ok
+            then do
+              let newRules = addExpenseRule rules cat lim
+              saveRules newRules
+              putStrLn "  Regla creada."
+              return newRules
+            else putStrLn "  Cancelado." >> return rules
 
     "2" -> do
       putStrLn "\n  -- Nueva regla: ahorro minimo total --"
@@ -201,10 +395,15 @@ rulesMenu rules store = do
       case readMaybe minStr :: Maybe Double of
         Nothing  -> putStrLn "  Monto invalido. Cancelado." >> return rules
         Just minAmt -> do
-          let newRules = addSavingRule rules minAmt
-          saveRules newRules
-          printf "  Regla creada: si ahorro total es menor a %.2f -> advertencia.\n" minAmt
-          return newRules
+          printf "  Regla: si ahorro total es menor a %.2f -> advertencia\n" minAmt
+          ok <- confirm "  Guardar regla?"
+          if ok
+            then do
+              let newRules = addSavingRule rules minAmt
+              saveRules newRules
+              putStrLn "  Regla creada."
+              return newRules
+            else putStrLn "  Cancelado." >> return rules
 
     "3" -> do
       putStrLn "\n  -- Reglas activas --"
@@ -219,17 +418,22 @@ rulesMenu rules store = do
         else do
           putStrLn "\n  -- Reglas activas --"
           mapM_ printRuleSummary rules
-          idStr <- prompt "  ID de la regla a eliminar: "
+          idStr <- prompt "\n  ID de la regla a eliminar: "
           case readMaybe idStr :: Maybe Int of
             Nothing  -> putStrLn "  ID invalido." >> return rules
             Just rid ->
-              if any ((== rid) . ruleId) rules
-                then do
-                  let newRules = removeRule rid rules
-                  saveRules newRules
-                  printf "  Regla #%d eliminada.\n" rid
-                  return newRules
-                else putStrLn "  No existe una regla con ese ID." >> return rules
+              case find ((== rid) . ruleId) rules of
+                Nothing -> putStrLn "  No existe una regla con ese ID." >> return rules
+                Just r  -> do
+                  printRuleSummary r
+                  ok <- confirm "  Eliminar esta regla?"
+                  if ok
+                    then do
+                      let newRules = removeRule rid rules
+                      saveRules newRules
+                      printf "  Regla #%d eliminada.\n" rid
+                      return newRules
+                    else putStrLn "  Cancelado." >> return rules
 
     "5" -> evaluateRules rules store >> return rules
 
@@ -237,16 +441,15 @@ rulesMenu rules store = do
 
     _   -> putStrLn "  Opcion invalida." >> return rules
 
--- | Imprime un resumen legible de una regla.
 printRuleSummary :: Rule -> IO ()
 printRuleSummary rule =
   case ruleType rule of
     ExpenseLimitRule cat lim ->
       printf "  [#%d] ALERTA si gastos en '%s' superan %.2f\n"
-             (ruleId rule) cat lim
+        (ruleId rule) cat lim
     SavingMinRule minAmt ->
       printf "  [#%d] ADVERTENCIA si ahorro total es menor a %.2f\n"
-             (ruleId rule) minAmt
+        (ruleId rule) minAmt
 
 -- ---------------------------------------------------------------------------
 -- Placeholder para secciones en desarrollo
@@ -267,18 +470,19 @@ header = do
   putStrLn "   Sistema de Gestion Financiera v1.0"
   putStrLn "========================================"
 
-mainLoop :: RecordStore -> RuleStore -> IO ()
-mainLoop store rules = do
+mainLoop :: RecordStore -> RuleStore -> BudgetStore -> IO ()
+mainLoop store rules budgets = do
   putStrLn ""
   header
   printf "  Registros en memoria : %d\n" (length store)
+  printf "  Presupuestos activos : %d\n" (length budgets)
   printf "  Reglas activas       : %d\n" (length rules)
   putStrLn "----------------------------------------"
   putStrLn "  1. Agregar registro financiero"
   putStrLn "  2. Listar registros"
   putStrLn "  3. Filtrar registros"
   putStrLn "  ----"
-  putStrLn "  4. Presupuestos               [2.2 - En desarrollo]"
+  putStrLn "  4. Presupuestos"
   putStrLn "  5. Analisis financiero        [2.3 - En desarrollo]"
   putStrLn "  6. Simulacion financiera      [2.4 - En desarrollo]"
   putStrLn "  7. Sistema de reglas"
@@ -288,22 +492,32 @@ mainLoop store rules = do
   putStrLn "========================================"
   opt <- prompt "  Opcion: "
   case opt of
-    "1" -> addRecordMenu store rules >>= \newStore -> mainLoop newStore rules
-    "2" -> listMenu store            >> mainLoop store rules
-    "3" -> filterMenu store          >> mainLoop store rules
-    "4" -> comingSoon "Presupuestos"          >> mainLoop store rules
-    "5" -> comingSoon "Analisis Financiero"   >> mainLoop store rules
-    "6" -> comingSoon "Simulacion Financiera" >> mainLoop store rules
-    "7" -> rulesMenu rules store >>= \newRules -> mainLoop store newRules
-    "8" -> comingSoon "Reportes"              >> mainLoop store rules
-    "9" -> exitApp store rules
-    _   -> putStrLn "  Opcion invalida." >> mainLoop store rules
+    "1" -> addRecordMenu store rules
+             >>= \s -> mainLoop s rules budgets
+    "2" -> listMenu store
+             >> mainLoop store rules budgets
+    "3" -> filterMenu store
+             >> mainLoop store rules budgets
+    "4" -> budgetsMenu budgets store
+             >>= \b -> mainLoop store rules b
+    "5" -> comingSoon "Analisis Financiero"
+             >> mainLoop store rules budgets
+    "6" -> comingSoon "Simulacion Financiera"
+             >> mainLoop store rules budgets
+    "7" -> rulesMenu rules store
+             >>= \r -> mainLoop store r budgets
+    "8" -> comingSoon "Reportes"
+             >> mainLoop store rules budgets
+    "9" -> exitApp store rules budgets
+    _   -> putStrLn "  Opcion invalida."
+             >> mainLoop store rules budgets
 
-exitApp :: RecordStore -> RuleStore -> IO ()
-exitApp store rules = do
+exitApp :: RecordStore -> RuleStore -> BudgetStore -> IO ()
+exitApp store rules budgets = do
   putStrLn "\n  Guardando datos antes de salir..."
   saveRecords defaultFilePath store
   saveRules rules
+  saveBudgets budgets
   putStrLn "\n  Hasta luego!\n"
 
 main :: IO ()
@@ -313,6 +527,7 @@ main = do
   putStrLn ""
   putStrLn "  Bienvenido al Sistema de Gestion Financiera"
   putStrLn "  Cargando datos..."
-  store <- loadRecords defaultFilePath
-  rules <- loadRules
-  mainLoop store rules
+  store   <- loadRecords defaultFilePath
+  rules   <- loadRules
+  budgets <- loadBudgets
+  mainLoop store rules budgets
