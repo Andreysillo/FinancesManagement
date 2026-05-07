@@ -15,6 +15,9 @@ library
     , Persistence
     , Rules
     , Budgets
+    , Analysis
+    , Simulation
+    , Reports
   hs-source-dirs:   src
   build-depends:
       base   >= 4.7 && < 5

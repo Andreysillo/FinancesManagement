@@ -1,10 +1,13 @@
 module Main where
 
+import Analysis
 import Budgets
 import Display
 import Persistence
 import Records
+import Reports
 import Rules
+import Simulation
 import Types
 
 import Data.Char          (isSpace, toLower)
@@ -461,6 +464,282 @@ comingSoon nombre = do
   putStrLn "  [ En desarrollo ]"
 
 -- ---------------------------------------------------------------------------
+-- Menu: analisis financiero (2.3)
+-- ---------------------------------------------------------------------------
+
+analysisMenu :: RecordStore -> IO ()
+analysisMenu store = do
+  putStrLn "\n--- Analisis Financiero ---"
+  putStrLn "  1. Flujo de caja mensual"
+  putStrLn "  2. Tendencias de gasto"
+  putStrLn "  3. Proyecciones de gastos"
+  putStrLn "  4. Categorias con mayor impacto"
+  putStrLn "  5. Volver"
+  opt <- prompt "  Opcion (1-5): "
+  case opt of
+    "1" -> do
+      moStr <- prompt "  Mes (1-12): "
+      yrStr <- prompt "  Ano (ej: 2026): "
+      case (readMaybe moStr :: Maybe Int, readMaybe yrStr :: Maybe Integer) of
+        (Just mo, Just yr) | mo >= 1 && mo <= 12 -> do
+          let cf = calculateCashFlowMonth store yr mo
+          putStrLn separator
+          printf "  Flujo de Caja - %d/%d\n" mo yr
+          printf "  Ingresos      : %.2f\n" (cfIncome cf)
+          printf "  Gastos        : %.2f\n" (cfExpenses cf)
+          printf "  Ahorros       : %.2f\n" (cfSavings cf)
+          printf "  Inversiones   : %.2f\n" (cfInvestments cf)
+          printf "  Flujo Neto    : %.2f\n" (cfNetFlow cf)
+          putStrLn separator
+        _ -> putStrLn "  Periodo invalido."
+
+    "2" -> do
+      monthsStr <- prompt "  Cantidad de meses a analizar (ej: 12): "
+      case readMaybe monthsStr :: Maybe Int of
+        Nothing -> putStrLn "  Cantidad invalida."
+        Just months | months > 0 -> do
+          let trends = calculateSpendingTrends store months
+          if null trends
+            then putStrLn "  No hay datos de gasto disponibles."
+            else do
+              putStrLn separator
+              putStrLn $ "  Tendencias de Gasto (ultimos " ++ show months ++ " meses)"
+              mapM_ printTrendSummary (concatMap snd trends)
+              putStrLn separator
+        _ -> putStrLn "  Cantidad invalida."
+
+    "3" -> do
+      cat <- trim <$> prompt "  Categoria (o Enter para omitir): "
+      monthsStr <- prompt "  Meses a proyectar: "
+      case readMaybe monthsStr :: Maybe Int of
+        Nothing -> putStrLn "  Cantidad invalida."
+        Just months | months > 0 -> do
+          let category = if null cat then "General" else cat
+              projections = if null cat
+                            then []
+                            else projectExpenses store months category
+          if null projections
+            then putStrLn $ "  No hay datos historicos para '" ++ category ++ "'."
+            else do
+              putStrLn separator
+              printf "  Proyecciones de Gastos - %s\n" category
+              mapM_ printProjection projections
+              putStrLn separator
+        _ -> putStrLn "  Cantidad invalida."
+
+    "4" -> do
+      putStrLn "  1. Todas las categorias"
+      putStrLn "  2. Solo mes actual"
+      opt2 <- prompt "  Opcion (1-2): "
+      today <- utctDay <$> getCurrentTime
+      let (yr, mo, _) = toGregorian today
+      let period = case opt2 of
+                     "1" -> Nothing
+                     "2" -> Just (yr, mo)
+                     _   -> Nothing
+      let impacts = calculateCategoryImpact store period
+      if null impacts
+        then putStrLn "  No hay datos disponibles."
+        else do
+          putStrLn separator
+          putStrLn "  Categorias con Mayor Impacto"
+          mapM_ printImpact impacts
+          putStrLn separator
+
+    "5" -> return ()
+
+    _ -> putStrLn "  Opcion invalida."
+
+printTrendSummary :: SpendingTrend -> IO ()
+printTrendSummary t = do
+  let status = case trendStatus t of
+                 Increasing -> "Aumentando"
+                 Decreasing -> "Disminuyendo"
+                 Stable     -> "Estable"
+  printf "  %-20s Promedio: %.2f  Cambio: %+.1f%%  %s\n"
+    (trendCategory t) (trendAvgMonthly t) (trendChangePercent t) status
+
+printProjection :: ProjectedExpense -> IO ()
+printProjection p =
+  let (yr, mo) = projMonth p
+  in printf "  %d/%d: %.2f\n" mo yr (projAmount p)
+
+printImpact :: CategoryImpact -> IO ()
+printImpact i =
+  printf "  [#%d] %-20s Total: %.2f  (%.1f%%)\n"
+    (impactRank i) (impactCategory i) (impactTotal i) (impactPercentOfTotal i)
+
+-- ---------------------------------------------------------------------------
+-- Menu: simulacion financiera (2.4)
+-- ---------------------------------------------------------------------------
+
+simulationMenu :: RecordStore -> IO ()
+simulationMenu store = do
+  putStrLn "\n--- Simulacion Financiera ---"
+  putStrLn "  1. Simular reduccion de gastos"
+  putStrLn "  2. Proyectar ahorros en el tiempo"
+  putStrLn "  3. Volver"
+  opt <- prompt "  Opcion (1-3): "
+  case opt of
+    "1" -> do
+      putStrLn "\n  -- Simulacion de Reduccion de Gastos --"
+      name <- trim <$> prompt "  Nombre del escenario (ej: Reduccion 20%): "
+      reducStr <- prompt "  Porcentaje de reduccion (0-100): "
+      case readMaybe reducStr :: Maybe Double of
+        Nothing -> putStrLn "  Porcentaje invalido."
+        Just reduc | reduc >= 0 && reduc <= 100 -> do
+          putStrLn "  Categorias afectadas:"
+          putStrLn "    1. Todas las categorias"
+          putStrLn "    2. Solo una categoria"
+          opt2 <- prompt "  Opcion (1-2): "
+          case opt2 of
+            "1" -> do
+              let scenario = createScenario name (reduc / 100) []
+              today <- utctDay <$> getCurrentTime
+              let (yr, mo, _) = toGregorian today
+              let result = simulateScenario store (Just (yr, mo)) scenario
+              printSimulationResult result
+
+            "2" -> do
+              cat <- trim <$> prompt "  Categoria: "
+              let scenario = createScenario name (reduc / 100) [cat]
+              today <- utctDay <$> getCurrentTime
+              let (yr, mo, _) = toGregorian today
+              let result = simulateScenario store (Just (yr, mo)) scenario
+              printSimulationResult result
+
+            _ -> putStrLn "  Opcion invalida."
+
+        _ -> putStrLn "  Porcentaje invalido."
+
+    "2" -> do
+      putStrLn "\n  -- Proyeccion de Ahorros --"
+      name <- trim <$> prompt "  Nombre del escenario: "
+      reducStr <- prompt "  Porcentaje de reduccion (0-100): "
+      monthsStr <- prompt "  Meses a proyectar: "
+      case (readMaybe reducStr :: Maybe Double, readMaybe monthsStr :: Maybe Int) of
+        (Just reduc, Just months) | reduc >= 0 && reduc <= 100 && months > 0 -> do
+          let scenario = createScenario name (reduc / 100) []
+              projections = projectSavingsOverTime store scenario months
+          if null projections
+            then putStrLn "  No hay datos disponibles para proyectar."
+            else do
+              putStrLn separator
+              printf "  Proyeccion de Ahorros - %s\n" name
+              printf "  Reduccion aplicada: %.0f%%\n" reduc
+              mapM_ printSavingsProjection projections
+              putStrLn separator
+        _ -> putStrLn "  Datos invalidos."
+
+    "3" -> return ()
+
+    _ -> putStrLn "  Opcion invalida."
+
+printSimulationResult :: SimulationResult -> IO ()
+printSimulationResult r = do
+  putStrLn separator
+  printf "  Escenario: %s\n" (scenarioName (simScenario r))
+  printf "  Gasto mensual actual : %.2f\n" (simCurrentMonthly r)
+  printf "  Gasto proyectado     : %.2f\n" (simProjectedMonthly r)
+  printf "  Ahorro mensual       : %.2f\n" (simMonthlySavings r)
+  printf "  Ahorro anual         : %.2f\n" (simProjectedYearSavings r)
+  putStrLn "  Desglose por categoria:"
+  mapM_ (\(cat, before, after) ->
+    printf "    %-20s Antes: %.2f  Despues: %.2f\n" cat before after
+    ) (simBreakdown r)
+  putStrLn separator
+
+printSavingsProjection :: SavingsProjection -> IO ()
+printSavingsProjection p =
+  let (yr, mo) = savMonth p
+  in printf "  %d/%d: %.2f acumulado\n" mo yr (savAmount p)
+
+-- ---------------------------------------------------------------------------
+-- Menu: reportes (2.7)
+-- ---------------------------------------------------------------------------
+
+reportsMenu :: RecordStore -> IO ()
+reportsMenu store = do
+  putStrLn "\n--- Reportes ---"
+  putStrLn "  1. Resumen mensual"
+  putStrLn "  2. Comparacion entre periodos"
+  putStrLn "  3. Categorias con mayor gasto"
+  putStrLn "  4. Volver"
+  opt <- prompt "  Opcion (1-4): "
+  case opt of
+    "1" -> do
+      moStr <- prompt "  Mes (1-12): "
+      yrStr <- prompt "  Ano (ej: 2026): "
+      case (readMaybe moStr :: Maybe Int, readMaybe yrStr :: Maybe Integer) of
+        (Just mo, Just yr) | mo >= 1 && mo <= 12 -> do
+          let summary = generateMonthlySummary store yr mo
+          putStrLn separator
+          printf "  Resumen - %d/%d\n" mo yr
+          printf "  Ingresos totales  : %.2f\n" (sumTotalIncome summary)
+          printf "  Gastos totales    : %.2f\n" (sumTotalExpenses summary)
+          printf "  Ahorros totales   : %.2f\n" (sumTotalSavings summary)
+          printf "  Inversiones       : %.2f\n" (sumTotalInvestments summary)
+          printf "  Flujo neto        : %.2f\n" (sumNetFlow summary)
+          putStrLn "  Gastos por categoria:"
+          mapM_ (\(cat, amt) ->
+            printf "    %-20s %.2f\n" cat amt
+            ) (sumByCategory summary)
+          putStrLn separator
+        _ -> putStrLn "  Periodo invalido."
+
+    "2" -> do
+      moStr1 <- prompt "  Periodo 1 - Mes (1-12): "
+      yrStr1 <- prompt "  Periodo 1 - Ano: "
+      moStr2 <- prompt "  Periodo 2 - Mes (1-12): "
+      yrStr2 <- prompt "  Periodo 2 - Ano: "
+      case (readMaybe moStr1 :: Maybe Int, readMaybe yrStr1 :: Maybe Integer
+           ,readMaybe moStr2 :: Maybe Int, readMaybe yrStr2 :: Maybe Integer) of
+        (Just mo1, Just yr1, Just mo2, Just yr2)
+          | mo1 >= 1 && mo1 <= 12 && mo2 >= 1 && mo2 <= 12 -> do
+            let comp = comparePeriods store (yr1, mo1) (yr2, mo2)
+            putStrLn separator
+            printf "  Comparacion %d/%d vs %d/%d\n" mo1 yr1 mo2 yr2
+            printf "  Gastos periodo 1 : %.2f\n" (compExpenses1 comp)
+            printf "  Gastos periodo 2 : %.2f\n" (compExpenses2 comp)
+            printf "  Cambio absoluto  : %+.2f\n" (compChange comp)
+            printf "  Cambio porcentual: %+.1f%%\n" (compChangePercent comp)
+            let trendStr = case compTrendDirection comp of
+                             Increasing -> "En aumento"
+                             Decreasing -> "En disminucion"
+                             Stable     -> "Estable"
+            printf "  Tendencia        : %s\n" trendStr
+            putStrLn separator
+        _ -> putStrLn "  Periodos invalidos."
+
+    "3" -> do
+      putStrLn "  1. Todas las categorias"
+      putStrLn "  2. Solo mes actual"
+      opt2 <- prompt "  Opcion (1-2): "
+      today <- utctDay <$> getCurrentTime
+      let (yr, mo, _) = toGregorian today
+      let period = case opt2 of
+                     "1" -> Nothing
+                     "2" -> Just (yr, mo)
+                     _   -> Nothing
+      let breakdown = generateCategoryBreakdown store period
+      if null breakdown
+        then putStrLn "  No hay datos disponibles."
+        else do
+          putStrLn separator
+          putStrLn "  Categorias con Mayor Gasto"
+          mapM_ printCategoryBreakdown breakdown
+          putStrLn separator
+
+    "4" -> return ()
+
+    _ -> putStrLn "  Opcion invalida."
+
+printCategoryBreakdown :: CategoryBreakdown -> IO ()
+printCategoryBreakdown c =
+  printf "  [#%d] %-20s %.2f  (%.1f%% - %d transacciones)\n"
+    (cbRank c) (cbCategory c) (cbAmount c) (cbPercentOfTotal c) (cbTransactionCount c)
+
+-- ---------------------------------------------------------------------------
 -- Bucle principal
 -- ---------------------------------------------------------------------------
 
@@ -483,10 +762,10 @@ mainLoop store rules budgets = do
   putStrLn "  3. Filtrar registros"
   putStrLn "  ----"
   putStrLn "  4. Presupuestos"
-  putStrLn "  5. Analisis financiero        [2.3 - En desarrollo]"
-  putStrLn "  6. Simulacion financiera      [2.4 - En desarrollo]"
+  putStrLn "  5. Analisis financiero XXXXXXXXXXXXXXXXXXXX "
+  putStrLn "  6. Simulacion financiera      XXXXXXXXXXXXXXXXXXXX"
   putStrLn "  7. Sistema de reglas"
-  putStrLn "  8. Reportes                   [2.7 - En desarrollo]"
+  putStrLn "  8. Reportes                   XXXXXXXXXXXXXXXXXXXX"
   putStrLn "  ----"
   putStrLn "  9. Salir"
   putStrLn "========================================"
@@ -500,13 +779,13 @@ mainLoop store rules budgets = do
              >> mainLoop store rules budgets
     "4" -> budgetsMenu budgets store
              >>= \b -> mainLoop store rules b
-    "5" -> comingSoon "Analisis Financiero"
+    "5" -> analysisMenu store
              >> mainLoop store rules budgets
-    "6" -> comingSoon "Simulacion Financiera"
+    "6" -> simulationMenu store
              >> mainLoop store rules budgets
     "7" -> rulesMenu rules store
              >>= \r -> mainLoop store r budgets
-    "8" -> comingSoon "Reportes"
+    "8" -> reportsMenu store
              >> mainLoop store rules budgets
     "9" -> exitApp store rules budgets
     _   -> putStrLn "  Opcion invalida."
