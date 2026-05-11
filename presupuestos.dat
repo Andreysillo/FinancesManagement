@@ -1,1 +1,1 @@
-[Budget {budgetId = 1, budgetCategory = "Salidas", budgetLimit = 90.0}]
+[Budget {budgetId = 1, budgetCategory = "Salidas", budgetLimit = 90.0},Budget {budgetId = 2, budgetCategory = "Gasto", budgetLimit = 50.0}]
