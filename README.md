@@ -85,6 +85,7 @@ info
 
 ## Manual de Usuario
 
-Link del manual de usuario: https://docs.google.com/document/d/1eqWaTk0mX0qbsBcEUqFG1kZ7a0mzxgmpBSWuPg8sUM4/edit?usp=sharing
+Link del manual de usuario: https://docs.google.com/document/d/1rAzjif-6z02T0bY1jq8WedCgVM4M9fEMBX42-46sYDU/edit?usp=sharing
+
 
 
