@@ -7,6 +7,9 @@ module Simulation
   , projectSavingsOverTime
   ) where
 
+-- Exports y imports necesarios 
+
+-- Este archivo simula escenarios de reduccion de gastos y proyecta ahorros futuros que haya.
 import Types
 import Records
 import Data.List          (groupBy, sortBy)
@@ -14,14 +17,14 @@ import Data.Ord           (comparing)
 import Data.Time.Calendar (toGregorian)
 import Data.Char          (toLower)
 
--- | Escenario de simulación financiera.
+-- Escenario de simulación financiera.
 data Scenario = Scenario
   { scenarioName              :: String
   , scenarioReduction         :: Double
   , scenarioAffectedCategories :: [String]
   } deriving (Show, Read, Eq)
 
--- | Resultado de una simulación.
+-- Resultado de una simulación.
 data SimulationResult = SimulationResult
   { simScenario              :: Scenario
   , simCurrentMonthly        :: Double
@@ -31,15 +34,13 @@ data SimulationResult = SimulationResult
   , simBreakdown             :: [(String, Double, Double)]
   } deriving (Show, Read, Eq)
 
--- | Proyección de ahorros acumulados.
+-- Proyección de ahorros acumulados.
 data SavingsProjection = SavingsProjection
   { savMonth  :: (Integer, Int)
   , savAmount :: Double
   } deriving (Show, Read, Eq)
 
--- ---------------------------------------------------------------------------
 -- Construcción
--- ---------------------------------------------------------------------------
 
 -- | Crea un escenario de simulación.
 createScenario :: String -> Double -> [String] -> Scenario
@@ -55,11 +56,9 @@ isAffectedCategory :: String -> [String] -> Bool
 isAffectedCategory _   []           = False
 isAffectedCategory cat affectedCats = any (isCategoryMatch cat) affectedCats
 
--- ---------------------------------------------------------------------------
 -- Simulación
--- ---------------------------------------------------------------------------
 
--- | Simula un escenario de reducción de gastos.
+-- Simula un escenario de reducción de gastos devuelve un desglose completo.
 simulateScenario :: RecordStore -> Maybe (Integer, Int) -> Scenario -> SimulationResult
 simulateScenario store period scenario =
   let expenseRecords = case period of
@@ -93,7 +92,7 @@ simulateScenario store period scenario =
 
   in SimulationResult scenario currentMonthly projectedMonthly monthlySavings yearSavings breakdownResults
 
--- | Proyecta ahorros a lo largo del tiempo bajo un escenario.
+-- Proyecta ahorros a lo largo del tiempo bajo un escenario, digamos acumulados a X meses
 projectSavingsOverTime :: RecordStore -> Scenario -> Int -> [SavingsProjection]
 projectSavingsOverTime store scenario monthsToProject =
   let expenseRecords = filterByType Expense store
@@ -148,7 +147,7 @@ filterByMonth yr mo = filter (\r ->
   in (y, m) == (yr, mo)
   )
 
--- | Agrupa registros por mes (reusada de Analysis).
+-- | Agrupa registros por mes (reusada de Analysis otar vez).
 groupByMonth :: RecordStore -> [((Integer, Int), RecordStore)]
 groupByMonth rs =
   let toYearMonth d = let (y, m, _) = toGregorian d in (y, m)

@@ -10,6 +10,10 @@ module Analysis
   , projectExpenses
   ) where
 
+-- Imports y exportss del archivo
+
+-- Archivo que analiza patrones en las finanzas
+
 import Types
 import Records
 import Data.List          (groupBy, sortBy, sortOn, nubBy)
@@ -55,15 +59,13 @@ data ProjectedExpense = ProjectedExpense
   , projAmount   :: Double
   } deriving (Show, Read, Eq)
 
--- ---------------------------------------------------------------------------
 -- Utilidades
--- ---------------------------------------------------------------------------
 
 -- | Extrae año y mes de una fecha.
 toYearMonth :: Day -> (Integer, Int)
 toYearMonth d = let (y, m, _) = toGregorian d in (y, m)
 
--- | Filtra registros por año y mes.
+-- | Filtra registros po mes.
 filterByMonth :: Integer -> Int -> RecordStore -> RecordStore
 filterByMonth yr mo = filter (\r -> toYearMonth (date r) == (yr, mo))
 
@@ -79,9 +81,7 @@ average :: [Double] -> Double
 average [] = 0
 average xs = sum xs / fromIntegral (length xs)
 
--- ---------------------------------------------------------------------------
 -- Cálculos principales
--- ---------------------------------------------------------------------------
 
 -- | Calcula flujo de caja para un mes específico.
 calculateCashFlowMonth :: RecordStore -> Integer -> Int -> CashFlowMonth
@@ -149,7 +149,7 @@ calculateCategoryImpact store period =
            ranked = zip [1..] (sortOn (Down . impactTotal) impacts)
        in [impact { impactRank = rank } | (rank, impact) <- ranked]
 
--- | Proyecta gastos futuros para una categoría usando promedio móvil.
+-- | Proyecta gastos futuros para una categoría usando promedio.
 projectExpenses :: RecordStore -> Int -> String -> [ProjectedExpense]
 projectExpenses store monthsToProject cat =
   let catRecords = filterByCategory cat (filterByType Expense store)

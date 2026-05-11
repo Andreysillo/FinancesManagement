@@ -19,28 +19,36 @@ import System.IO          (hFlush, hSetEncoding, stdin, stdout, utf8)
 import Text.Printf        (printf)
 import Text.Read          (readMaybe)
 
--- ---------------------------------------------------------------------------
--- Utilidades de entrada/salida
--- ---------------------------------------------------------------------------
+-- Imports de todos los tipos de data necesarios y los modulos de cada parte del poryecto
 
+-- Este archivo contiene toda la logica de interfaz de usuario en consola y orquesta los modulos ya creados
+
+-- Utilidades de entrada/salida
+
+-- Solicita entrada al usuario con flush
 prompt :: String -> IO String
 prompt msg = putStr msg >> hFlush stdout >> getLine
 
+-- Elimina espacios en blanco
 trim :: String -> String
 trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
+-- Pide confirmacion para acciones importantes
 confirm :: String -> IO Bool
 confirm msg = do
   resp <- map toLower . trim <$> prompt (msg ++ " (s/n): ")
   return (resp == "s" || resp == "si")
 
+-- Pasa fechas al formato debido
 parseDate :: String -> Maybe Day
 parseDate = parseTimeM True defaultTimeLocale "%d-%m-%Y"
 
+-- Divide etiquetas por comas despues
 parseTags :: String -> [String]
 parseTags ""  = []
 parseTags s   = map trim (splitOn ',' s)
 
+-- Función auxiliar para dividir strings por un caracter
 splitOn :: Char -> String -> [String]
 splitOn c s =
   let (tok, rest) = break (== c) s
@@ -48,9 +56,7 @@ splitOn c s =
               []     -> []
               (_:xs) -> splitOn c xs
 
--- ---------------------------------------------------------------------------
 -- Seleccion de tipo de registro
--- ---------------------------------------------------------------------------
 
 selectRecordType :: IO (Maybe RecordType)
 selectRecordType = do
@@ -67,10 +73,9 @@ selectRecordType = do
     "4" -> Just Investment
     _   -> Nothing
 
--- ---------------------------------------------------------------------------
--- Menu: agregar registro (2.1)
--- ---------------------------------------------------------------------------
+-- Menu: agregar registro (2.1) Registro avanzado de registros financieros avanzado
 
+-- Crea un registro con validaciones, si no lo pasa se sale
 addRecordMenu :: RecordStore -> RuleStore -> IO RecordStore
 addRecordMenu store rules = do
   putStrLn "\n--- Agregar Registro Financiero ---"
@@ -108,10 +113,9 @@ addRecordMenu store rules = do
                   return newStore
                 else putStrLn "  Cancelado. No se guardo ningun registro." >> return store
 
--- ---------------------------------------------------------------------------
--- Menu: listar registros (2.1)
--- ---------------------------------------------------------------------------
+-- Menu: listar registros 
 
+-- Muestra todos los registros con opcion de ordenar 
 listMenu :: RecordStore -> IO ()
 listMenu store = do
   putStrLn "\n--- Listar Registros ---"
@@ -129,10 +133,9 @@ listMenu store = do
   printf "\n  Total: %d registro(s)\n" (length sorted)
   printRecords sorted
 
--- ---------------------------------------------------------------------------
--- Menu: filtrar registros (2.1)
--- ---------------------------------------------------------------------------
+-- Menu: filtrar registros
 
+-- Filtra por categoria, fecha o etiqueta
 filterMenu :: RecordStore -> IO ()
 filterMenu store = do
   putStrLn "\n--- Filtrar Registros ---"
@@ -171,9 +174,7 @@ filterMenu store = do
       printRecords r
     _ -> putStrLn "  Opcion invalida."
 
--- ---------------------------------------------------------------------------
--- Menu: presupuestos (2.2)
--- ---------------------------------------------------------------------------
+-- Primero todos los prints para mostrar presupuestos, comparaciones y alertas, luego los menus para agregar, modificar y eliminar presupuestos
 
 printBudgetLine :: Budget -> IO ()
 printBudgetLine b =
@@ -201,6 +202,7 @@ showComparison budgets store period label = do
   mapM_ printComparison comps
   putStrLn separator
 
+-- Ahora si para crear presupuesto y modificarlo
 addBudgetMenu :: BudgetStore -> IO BudgetStore
 addBudgetMenu budgets = do
   putStrLn "\n  -- Definir Presupuesto --"
@@ -243,6 +245,7 @@ addBudgetMenu budgets = do
               return updated
             else putStrLn "  Cancelado." >> return bs
 
+-- modificar presupuesto
 updateBudgetMenu :: BudgetStore -> IO BudgetStore
 updateBudgetMenu [] =
   putStrLn "  No hay presupuestos para modificar." >> return []
@@ -272,6 +275,7 @@ updateBudgetMenu budgets = do
                   return updated
                 else putStrLn "  Cancelado." >> return budgets
 
+-- Finalmente para eliminar presupuesto
 deleteBudgetMenu :: BudgetStore -> IO BudgetStore
 deleteBudgetMenu [] =
   putStrLn "  No hay presupuestos para eliminar." >> return []
@@ -296,6 +300,7 @@ deleteBudgetMenu budgets = do
               return updated
             else putStrLn "  Cancelado." >> return budgets
 
+-- Menu del sistema de presupuestos (2.2)
 budgetsMenu :: BudgetStore -> RecordStore -> IO BudgetStore
 budgetsMenu budgets store = do
   putStrLn "\n--- Presupuestos ---"
@@ -360,10 +365,9 @@ budgetsMenu budgets store = do
 
     _   -> putStrLn "  Opcion invalida." >> return budgets
 
--- ---------------------------------------------------------------------------
--- Menu: sistema de reglas (2.5)
--- ---------------------------------------------------------------------------
+-- Menu: sistema de reglas 2.5
 
+-- Print de la opciones del sistema de reglas y luego el menu para agregar reglas de alerta por categoria, reglas de advertencia por ahorro minimo, ver reglas activas, eliminar reglas y evaluar reglas contra los registros actuales
 rulesMenu :: RuleStore -> RecordStore -> IO RuleStore
 rulesMenu rules store = do
   putStrLn "\n--- Sistema de Reglas ---"
@@ -444,6 +448,7 @@ rulesMenu rules store = do
 
     _   -> putStrLn "  Opcion invalida." >> return rules
 
+-- Pirnt de resumen de cada regla
 printRuleSummary :: Rule -> IO ()
 printRuleSummary rule =
   case ruleType rule of
@@ -454,18 +459,14 @@ printRuleSummary rule =
       printf "  [#%d] ADVERTENCIA si ahorro total es menor a %.2f\n"
         (ruleId rule) minAmt
 
--- ---------------------------------------------------------------------------
--- Placeholder para secciones en desarrollo
--- ---------------------------------------------------------------------------
-
+-- PAra la siguiente funcion 
 comingSoon :: String -> IO ()
 comingSoon nombre = do
   putStrLn $ "\n--- " ++ nombre ++ " ---"
   putStrLn "  [ En desarrollo ]"
 
--- ---------------------------------------------------------------------------
--- Menu: analisis financiero (2.3)
--- ---------------------------------------------------------------------------
+
+-- Menu: analisis financiero avanzado (2.3)
 
 analysisMenu :: RecordStore -> IO ()
 analysisMenu store = do
@@ -569,9 +570,7 @@ printImpact i =
   printf "  [#%d] %-20s Total: %.2f  (%.1f%%)\n"
     (impactRank i) (impactCategory i) (impactTotal i) (impactPercentOfTotal i)
 
--- ---------------------------------------------------------------------------
 -- Menu: simulacion financiera (2.4)
--- ---------------------------------------------------------------------------
 
 simulationMenu :: RecordStore -> IO ()
 simulationMenu store = do
@@ -635,6 +634,8 @@ simulationMenu store = do
 
     _ -> putStrLn "  Opcion invalida."
 
+
+-- Print de resultado de la simulacion
 printSimulationResult :: SimulationResult -> IO ()
 printSimulationResult r = do
   putStrLn separator
@@ -649,14 +650,13 @@ printSimulationResult r = do
     ) (simBreakdown r)
   putStrLn separator
 
+-- Print de proyeccion de ahorros
 printSavingsProjection :: SavingsProjection -> IO ()
 printSavingsProjection p =
   let (yr, mo) = savMonth p
   in printf "  %d/%d: %.2f acumulado\n" mo yr (savAmount p)
 
--- ---------------------------------------------------------------------------
 -- Menu: reportes (2.7)
--- ---------------------------------------------------------------------------
 
 reportsMenu :: RecordStore -> IO ()
 reportsMenu store = do
@@ -739,9 +739,7 @@ printCategoryBreakdown c =
   printf "  [#%d] %-20s %.2f  (%.1f%% - %d transacciones)\n"
     (cbRank c) (cbCategory c) (cbAmount c) (cbPercentOfTotal c) (cbTransactionCount c)
 
--- ---------------------------------------------------------------------------
 -- Bucle principal
--- ---------------------------------------------------------------------------
 
 header :: IO ()
 header = do

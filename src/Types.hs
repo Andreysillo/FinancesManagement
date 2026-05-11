@@ -4,7 +4,11 @@ module Types
   , RecordStore
   ) where
 
+-- Aqui exportamos los archivos.
+
 import Data.Time.Calendar (Day)
+
+-- Define el modelo de la bd digamos de toda la app 
 
 -- | Tipos de registro financiero soportados por el sistema.
 data RecordType

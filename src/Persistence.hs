@@ -4,6 +4,10 @@ module Persistence
   , defaultFilePath
   ) where
 
+-- Exports para excepciones, funciones de IO y el modelo de datos
+
+-- Este codigo nos permite guardar y cargar los registros financieros desde un archivo
+
 import Types
 import Control.Exception (SomeException, try)
 

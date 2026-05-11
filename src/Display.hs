@@ -5,15 +5,20 @@ module Display
   , separator
   ) where
 
+-- Impoerst y expoerts del archivo
+
+-- Nos encargamos aqui de formatear y mostrar datos en consola
+
 import Types
 import Data.List        (intercalate)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Text.Printf      (printf)
 
+-- Constante de guion entre cada output
 separator :: String
 separator = replicate 60 '-'
 
--- | Nombre legible en español para cada tipo de registro.
+-- | Nombre legible para cada tipo de registro.
 recordTypeName :: RecordType -> String
 recordTypeName Income     = "Ingreso"
 recordTypeName Expense    = "Gasto"

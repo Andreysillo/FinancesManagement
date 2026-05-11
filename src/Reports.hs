@@ -7,6 +7,10 @@ module Reports
   , generateCategoryBreakdown
   ) where
 
+-- Exports y imports de types, records y demas
+
+-- Este archivo genera reportes financieros que resumen y comparan datos financieros.
+
 import Types
 import Records
 import Analysis
@@ -26,7 +30,7 @@ data MonthlySummary = MonthlySummary
   , sumByCategory        :: [(String, Double)]
   } deriving (Show, Read, Eq)
 
--- | Comparación entre dos períodos.
+-- Comparación entre dos períodos.
 data PeriodComparison = PeriodComparison
   { compPeriod1         :: (Integer, Int)
   , compPeriod2         :: (Integer, Int)
@@ -37,7 +41,7 @@ data PeriodComparison = PeriodComparison
   , compTrendDirection  :: TrendStatus
   } deriving (Show, Read, Eq)
 
--- | Desglose de gastos por categoría.
+-- Desglose de gastos por categoría.
 data CategoryBreakdown = CategoryBreakdown
   { cbCategory          :: String
   , cbAmount            :: Double
@@ -46,15 +50,13 @@ data CategoryBreakdown = CategoryBreakdown
   , cbRank              :: Int
   } deriving (Show, Read, Eq)
 
--- ---------------------------------------------------------------------------
 -- Utilidades
--- ---------------------------------------------------------------------------
 
 -- | Extrae año y mes de una fecha.
 toYearMonth :: Day -> (Integer, Int)
 toYearMonth d = let (y, m, _) = toGregorian d in (y, m)
 
--- | Filtra registros por año y mes.
+-- | Filtra registros por mes 
 filterByMonth :: Integer -> Int -> RecordStore -> RecordStore
 filterByMonth yr mo = filter (\r -> toYearMonth (date r) == (yr, mo))
 
@@ -65,9 +67,7 @@ groupByMonth rs =
                         (sortBy (comparing date) rs)
   in [(toYearMonth (date (head g)), g) | g <- grouped, not (null g)]
 
--- ---------------------------------------------------------------------------
--- Generación de reportes
--- ---------------------------------------------------------------------------
+-- Generacion de reportes
 
 -- | Genera un resumen mensual.
 generateMonthlySummary :: RecordStore -> Integer -> Int -> MonthlySummary
@@ -89,7 +89,7 @@ generateMonthlySummary store yr mo =
   in MonthlySummary yr mo totalIncome totalExpenses totalSavings totalInvestments
        netFlow categoryBreakdown
 
--- | Compara gastos entre dos períodos.
+-- | Compara gastos entre dos períodos que el usuario escoge
 comparePeriods :: RecordStore -> (Integer, Int) -> (Integer, Int) -> PeriodComparison
 comparePeriods store period1 period2 =
   let (yr1, mo1) = period1
